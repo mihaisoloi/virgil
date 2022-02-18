@@ -16,7 +16,7 @@ lazy val root =
         val datastaxV = "4.13.0"
 
         val zio  = "dev.zio"
-        val zioV = "1.0.13"
+        val zioV = "2.0.0-RC2"
 
         Seq(
           datastax                        % "java-driver-core"        % datastaxV,

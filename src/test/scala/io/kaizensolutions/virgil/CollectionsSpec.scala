@@ -2,26 +2,25 @@ package io.kaizensolutions.virgil
 
 import io.kaizensolutions.virgil.codecs.Decoder
 import io.kaizensolutions.virgil.dsl._
-import zio.Has
-import zio.random.Random
+import zio.Random
 import zio.test.TestAspect.samples
 import zio.test._
 
 object CollectionsSpec {
-  def collectionsSpec: ZSpec[Has[CQLExecutor] with Random with Sized with TestConfig, Throwable] =
+  def collectionsSpec: ZSpec[CQLExecutor with Random with Sized with TestConfig, Throwable] =
     suite("Collections Specification") {
-      testM("Read and write a row containing collections") {
+      test("Read and write a row containing collections") {
         import SimpleCollectionRow._
-        checkM(gen) { expected =>
+        check(gen) { expected =>
           for {
             _      <- insert(expected).execute.runDrain
             result <- select(expected.id).execute.runCollect
             actual  = result.head
           } yield assertTrue(actual == expected) && assertTrue(result.length == 1)
         }
-      } + testM("Read and write a row containing nested collections") {
+      } + test("Read and write a row containing nested collections") {
         import NestedCollectionRow._
-        checkM(gen) { expected =>
+        check(gen) { expected =>
           for {
             _      <- insert(expected).execute.runDrain
             result <- select(expected.a).execute.runCollect
@@ -63,9 +62,9 @@ object SimpleCollectionRow {
   def gen: Gen[Random with Sized, SimpleCollectionRow] =
     for {
       id   <- Gen.int(1, 10000000)
-      map  <- Gen.mapOf(key = Gen.anyInt, value = Gen.anyString)
-      set  <- Gen.setOf(Gen.anyLong)
-      list <- Gen.listOf(Gen.anyString)
+      map  <- Gen.mapOf(key = Gen.int, value = Gen.string)
+      set  <- Gen.setOf(Gen.long)
+      list <- Gen.listOf(Gen.string)
     } yield SimpleCollectionRow(id, map, set, list)
 }
 
@@ -94,6 +93,6 @@ object NestedCollectionRow {
   def gen: Gen[Random with Sized, NestedCollectionRow] =
     for {
       a <- Gen.int(1, 10000000)
-      b <- Gen.mapOf(key = Gen.anyInt, value = Gen.setOf(Gen.setOf(Gen.setOf(Gen.setOf(Gen.anyInt)))))
+      b <- Gen.mapOf(key = Gen.int, value = Gen.setOf(Gen.setOf(Gen.setOf(Gen.setOf(Gen.int)))))
     } yield NestedCollectionRow(a, b)
 }

@@ -28,17 +28,26 @@ trait ColumnDecoder[ScalaType] { self =>
   final def decodeField[Structure <: GettableByName](structure: Structure, fieldName: String): ScalaType =
     convertDriverToScala(driverValue = readFromDriver(structure, fieldName))
 
-  def map[ScalaType2](f: ScalaType => ScalaType2): ColumnDecoder[ScalaType2] = new ColumnDecoder[ScalaType2] {
-    override type DriverType = self.DriverType
+  final def map[ScalaType2](f: ScalaType => ScalaType2): ColumnDecoder.WithDriver[ScalaType2, DriverType] =
+    new ColumnDecoder[ScalaType2] {
+      override type DriverType = self.DriverType
 
-    override def driverClass: Class[DriverType] = self.driverClass
+      override def driverClass: Class[DriverType] = self.driverClass
 
-    override def convertDriverToScala(driverValue: DriverType): ScalaType2 =
-      f(self.convertDriverToScala(driverValue))
+      override def convertDriverToScala(driverValue: DriverType): ScalaType2 =
+        f(self.convertDriverToScala(driverValue))
 
-    def readFromDriver[Structure <: GettableByName](structure: Structure, fieldName: String): DriverType =
-      self.readFromDriver(structure, fieldName)
-  }
+      def readFromDriver[Structure <: GettableByName](structure: Structure, fieldName: String): DriverType =
+        self.readFromDriver(structure, fieldName)
+    }
+
+  final def orDie[L, R](implicit ev: ScalaType =:= Either[L, R]): ColumnDecoder.WithDriver[R, DriverType] =
+    self.map { in =>
+      ev(in) match {
+        case Left(error)  => throw new RuntimeException(s"Failed to map input to ${driverClass.getName}: $error")
+        case Right(value) => value
+      }
+    }
 }
 object ColumnDecoder extends UdtColumnDecoderMagnoliaDerivation {
   type WithDriver[Scala, Driver] = ColumnDecoder[Scala] { type DriverType = Driver }

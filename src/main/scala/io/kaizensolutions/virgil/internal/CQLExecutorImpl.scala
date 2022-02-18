@@ -2,9 +2,9 @@ package io.kaizensolutions.virgil.internal
 
 import com.datastax.oss.driver.api.core.CqlSession
 import com.datastax.oss.driver.api.core.cql.{BatchType => _, _}
+import io.kaizensolutions.virgil._
 import io.kaizensolutions.virgil.configuration.{ExecutionAttributes, PageState}
 import io.kaizensolutions.virgil.internal.Proofs._
-import io.kaizensolutions.virgil._
 import zio._
 import zio.stream._
 
@@ -22,15 +22,15 @@ private[virgil] class CQLExecutorImpl(underlyingSession: CqlSession) extends CQL
   def execute[A](in: CQL[A]): Stream[Throwable, A] =
     in.cqlType match {
       case m: CQLType.Mutation =>
-        ZStream.fromEffect(executeMutation(m, in.executionAttributes))
+        ZStream.fromZIO(executeMutation(m, in.executionAttributes))
 
       case b: CQLType.Batch =>
-        ZStream.fromEffect(executeBatch(b, in.executionAttributes))
+        ZStream.fromZIO(executeBatch(b, in.executionAttributes))
 
       case q: CQLType.Query[A] =>
         q.pullMode match {
           case PullMode.TakeUpto(n) if n <= 1 =>
-            ZStream.fromEffectOption(executeSingleResultQuery(q, in.executionAttributes).some)
+            ZStream.fromZIOOption(executeSingleResultQuery(q, in.executionAttributes).some)
 
           case PullMode.TakeUpto(n) =>
             executeGeneralQuery(q, in.executionAttributes).take(n)
@@ -80,7 +80,7 @@ private[virgil] class CQLExecutorImpl(underlyingSession: CqlSession) extends CQL
   private def executeBatch(m: CQLType.Batch, config: ExecutionAttributes): Task[MutationResult] =
     ZIO
       .foreach(m.mutations)(buildMutation(_))
-      .mapEffect { statementsToBatch =>
+      .mapAttempt { statementsToBatch =>
         val batch = BatchStatement
           .builder(m.batchType.toDriver)
           .addStatements(statementsToBatch.toSeq.asJava)
@@ -96,7 +96,7 @@ private[virgil] class CQLExecutorImpl(underlyingSession: CqlSession) extends CQL
   ): ZStream[Any, Throwable, Output] = {
     val (queryString, bindMarkers) = CqlStatementRenderer.render(input)
     for {
-      boundStatement <- ZStream.fromEffect(buildStatement(queryString, bindMarkers, config))
+      boundStatement <- ZStream.fromZIO(buildStatement(queryString, bindMarkers, config))
       reader          = input.reader
       element        <- select(boundStatement).map(reader.decodeField(_, null))
     } yield element
@@ -137,8 +137,8 @@ private[virgil] class CQLExecutorImpl(underlyingSession: CqlSession) extends CQL
   private def select(query: Statement[_]): ZStream[Any, Throwable, Row] = {
     val initialEffect = ZIO.fromCompletionStage(underlyingSession.executeAsync(query))
 
-    ZStream.fromEffect(initialEffect).flatMap { initial =>
-      ZStream.paginateChunkM(initial) { resultSet =>
+    ZStream.fromZIO(initialEffect).flatMap { initial =>
+      ZStream.paginateChunkZIO(initial) { resultSet =>
         val emit = Chunk.fromIterable(resultSet.currentPage().asScala)
         if (resultSet.hasMorePages) {
           ZIO
@@ -165,7 +165,7 @@ private[virgil] class CQLExecutorImpl(underlyingSession: CqlSession) extends CQL
     columns: BindMarkers,
     config: ExecutionAttributes
   ): Task[BoundStatement] =
-    prepare(queryString).mapEffect { preparedStatement =>
+    prepare(queryString).mapAttempt { preparedStatement =>
       val result: BoundStatementBuilder = {
         val initial = preparedStatement.boundStatementBuilder()
         val boundColumns = columns.underlying.foldLeft(initial) { case (accBuilder, (colName, column)) =>

@@ -66,7 +66,7 @@ object CassandraContainer {
     }
 
     ZManaged
-      .make_(ZIO.effectTotal(container.start()))(ZIO.effectTotal(container.stop()))
+      .acquireRelease(ZIO.succeed(container.start()))(ZIO.succeed(container.stop()))
       .as(
         new CassandraContainer {
           override def getHost: Task[String] = Task(container.host)

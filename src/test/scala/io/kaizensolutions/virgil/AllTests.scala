@@ -3,19 +3,17 @@ package io.kaizensolutions.virgil
 import com.datastax.oss.driver.api.core.CqlSession
 import io.kaizensolutions.virgil.cql._
 import zio._
-import zio.blocking.{effectBlocking, Blocking}
 import zio.stream.ZStream
 import zio.test._
-import zio.test.environment.TestEnvironment
 
 import java.net.InetSocketAddress
 
 object AllTests extends DefaultRunnableSpec {
-  val dependencies: URLayer[Blocking, Has[CQLExecutor]] = {
+  val dependencies: ZLayer[Any, Nothing, CQLExecutor] = {
     val managedSession =
       for {
         c           <- CassandraContainer(CassandraType.Plain)
-        details     <- (c.getHost).zip(c.getPort).toManaged_
+        details     <- (c.getHost).zip(c.getPort).toManaged
         (host, port) = details
         session <- CQLExecutor(
                      CqlSession
@@ -30,18 +28,18 @@ object AllTests extends DefaultRunnableSpec {
             'replication_factor': 1
           }""".mutation
         useKeyspace = cql"USE virgil".mutation
-        _          <- session.execute(createKeyspace).runDrain.toManaged_
-        _          <- session.execute(useKeyspace).runDrain.toManaged_
-        _          <- runMigration(session, "migrations.cql").toManaged_
+        _          <- session.execute(createKeyspace).runDrain.toManaged
+        _          <- session.execute(useKeyspace).runDrain.toManaged
+        _          <- runMigration(session, "migrations.cql").toManaged
       } yield session
 
     managedSession.toLayer.orDie
   }
 
-  def runMigration(executor: CQLExecutor, fileName: String): ZIO[Blocking, Throwable, Unit] = {
+  def runMigration(executor: CQLExecutor, fileName: String): ZIO[Any, Throwable, Unit] = {
     val migrationCql =
       ZStream
-        .fromEffect(effectBlocking(scala.io.Source.fromResource(fileName).getLines()))
+        .fromZIO(ZIO.attemptBlocking(scala.io.Source.fromResource(fileName).getLines()))
         .flatMap(ZStream.fromIterator(_))
         .map(_.strip())
         .filterNot { l =>
@@ -49,12 +47,12 @@ object AllTests extends DefaultRunnableSpec {
           l.startsWith("--") ||
           l.startsWith("//")
         }
-        .fold("")(_ ++ _)
+        .runFold("")(_ ++ _)
         .map(_.split(";"))
 
     for {
       migrations <- migrationCql
-      _          <- ZIO.foreach_(migrations)(str => executor.execute(str.asCql.mutation).runDrain)
+      _          <- ZIO.foreachDiscard(migrations)(str => executor.execute(str.asCql.mutation).runDrain)
     } yield ()
   }
 
